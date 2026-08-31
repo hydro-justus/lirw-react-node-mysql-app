@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GitHub Actions deployment role for the 3-tier application
+
+Parameters:
+
+  GitHubOrg:
+    Type: String
+    Default: hydro-justus
+
+  GitHubRepo:
+    Type: String
+    Default: lirw-react-node-mysql-app
+
+  GitHubBranch:
+    Type: String
+    Default: main
+
+  FrontendBucketName:
+    Type: String
+
+  CloudFrontDistributionId:
+    Type: String
+
+  ECSClusterName:
+    Type: String
+
+  ECSServiceName:
+    Type: String
+
+  ECRRepositoryArn:
+    Type: String
+
+
+Resources:
+
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: threetier-github-actions-role
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+          - Effect: Allow
+
+            Principal:
+              Federated: arn:aws:iam::692859924055:oidc-provider/token.actions.githubusercontent.com
+
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+
+            Condition:
+
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub
+                  - 'repo:${Org}/${Repo}:ref:refs/heads/${Branch}'
+                  - Org: !Ref GitHubOrg
+                    Repo: !Ref GitHubRepo
+                    Branch: !Ref GitHubBranch
+
+
+      Policies:
+
+        - PolicyName: BackendDeployment
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource:
+                  - !Ref ECRRepositoryArn
+
+              - Effect: Allow
+                Action:
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                Resource: '*'
+
+
+        - PolicyName: FrontendDeployment
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${FrontendBucketName}'
+
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${FrontendBucketName}/*'
+
+              - Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                Resource:
+                  - !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}'
+
+
+Outputs:
+
+  GitHubActionsRoleArn:
+    Description: IAM role ARN used by GitHub Actions
+    Value: !GetAtt GitHubActionsRole.Arn

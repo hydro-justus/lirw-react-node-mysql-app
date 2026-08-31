@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Database infrastructure for the 3-tier application
+
+Parameters:
+  DatabaseSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+    Description: First private database subnet
+
+  DatabaseSubnet2Id:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second private database subnet
+
+  DatabaseSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for RDS
+
+  DBSnapshotIdentifier:
+    Type: String
+    Default: mysql-snapshot
+    Description: RDS snapshot to restore
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    Description: RDS instance class
+
+Resources:
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Database subnet group for the 3-tier application
+      SubnetIds:
+        - !Ref DatabaseSubnet1Id
+        - !Ref DatabaseSubnet2Id
+      Tags:
+        - Key: Name
+          Value: 3tier-db-subnet-group
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBSnapshotIdentifier: !Ref DBSnapshotIdentifier
+      DBInstanceClass: !Ref DBInstanceClass
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroupId
+      PubliclyAccessible: false
+      MultiAZ: false
+      StorageEncrypted: true
+      DeletionProtection: false
+      BackupRetentionPeriod: 1
+      Tags:
+        - Key: Name
+          Value: 3tier-mysql
+
+Outputs:
+
+  DatabaseEndpoint:
+    Description: RDS endpoint
+    Value: !GetAtt Database.Endpoint.Address
+
+  DatabasePort:
+    Description: RDS port
+    Value: !GetAtt Database.Endpoint.Port
+
+  DatabaseInstanceId:
+    Description: RDS instance identifier
+    Value: !Ref Database

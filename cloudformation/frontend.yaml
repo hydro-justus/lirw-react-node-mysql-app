@@ -1,0 +1,241 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Frontend infrastructure for the 3-tier application
+
+Parameters:
+
+  BackendLoadBalancerDNS:
+    Type: String
+    Description: DNS name of the backend Application Load Balancer
+
+  DomainName:
+    Type: String
+    Default: app.fenixkacar.link
+    Description: Custom domain name for the frontend
+
+  HostedZoneId:
+    Type: String
+    Default: Z00998763JY8GC70XZK6G
+    Description: Route 53 hosted zone ID
+
+  CertificateArn:
+    Type: String
+    Description: ACM certificate ARN in us-east-1
+
+
+Resources:
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+      Tags:
+        - Key: Name
+          Value: threetier-frontend
+
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: threetier-frontend-oac
+        Description: OAC for private frontend S3 bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+
+  ApiCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: threetier-api-cache-disabled
+
+        DefaultTTL: 0
+        MaxTTL: 0
+        MinTTL: 0
+
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
+
+          CookiesConfig:
+            CookieBehavior: none
+
+          HeadersConfig:
+            HeaderBehavior: none
+
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+
+  ApiOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: threetier-api-origin-request-policy
+
+        CookiesConfig:
+          CookieBehavior: all
+
+        HeadersConfig:
+          HeaderBehavior: whitelist
+          Headers:
+            - Origin
+            - Access-Control-Request-Headers
+            - Access-Control-Request-Method
+            - Authorization
+            - Content-Type
+
+        QueryStringsConfig:
+          QueryStringBehavior: all
+
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+
+        Enabled: true
+        Comment: CloudFront distribution for the 3-tier application
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+
+        Aliases:
+          - !Ref DomainName
+
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+
+
+        Origins:
+
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOAC
+
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+
+
+          - Id: BackendALBOrigin
+            DomainName: !Ref BackendLoadBalancerDNS
+
+            CustomOriginConfig:
+              HTTPPort: 80
+              OriginProtocolPolicy: http-only
+
+
+        DefaultCacheBehavior:
+
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+
+          AllowedMethods:
+            - GET
+            - HEAD
+
+          CachedMethods:
+            - GET
+            - HEAD
+
+          ForwardedValues:
+            QueryString: false
+
+            Cookies:
+              Forward: none
+
+
+        CacheBehaviors:
+
+          - PathPattern: /api/*
+            TargetOriginId: BackendALBOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+
+            AllowedMethods:
+              - DELETE
+              - GET
+              - HEAD
+              - OPTIONS
+              - PATCH
+              - POST
+              - PUT
+
+            CachedMethods:
+              - GET
+              - HEAD
+
+            CachePolicyId: !Ref ApiCachePolicy
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+
+      Bucket: !Ref FrontendBucket
+
+      PolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+
+            Principal:
+              Service: cloudfront.amazonaws.com
+
+            Action:
+              - s3:GetObject
+
+            Resource:
+              - !Sub '${FrontendBucket.Arn}/*'
+
+            Condition:
+
+              StringEquals:
+
+                AWS:SourceArn: !Sub
+                  - 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistributionId}'
+                  - DistributionId: !Ref CloudFrontDistribution
+
+
+  FrontendAliasRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
+
+Outputs:
+
+  FrontendBucketName:
+    Description: S3 bucket containing the frontend build
+    Value: !Ref FrontendBucket
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref CloudFrontDistribution
+
+  CloudFrontDomainName:
+    Description: CloudFront domain name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+
+  FrontendCustomDomain:
+    Description: Custom domain name
+    Value: !Ref DomainName

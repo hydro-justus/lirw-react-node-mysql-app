@@ -1,0 +1,249 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Backend infrastructure for the 3-tier application
+
+Parameters:
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  PublicSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+
+  PublicSubnet2Id:
+    Type: AWS::EC2::Subnet::Id
+
+  PrivateSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+
+  PrivateSubnet2Id:
+    Type: AWS::EC2::Subnet::Id
+
+  ALBSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+
+  ECSSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+
+  DatabaseEndpoint:
+    Type: String
+
+  DatabaseSecretArn:
+    Type: String
+
+  BackendPort:
+    Type: Number
+    Default: 3200
+
+
+Resources:
+
+  BackendRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: threetier-backend
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      Tags:
+        - Key: Name
+          Value: threetier-backend
+
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: threetier-cluster
+
+
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/threetier-backend
+      RetentionInDays: 7
+
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+      Policies:
+        - PolicyName: ReadDatabaseSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DatabaseSecretArn
+
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+
+  BackendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: threetier-backend
+      RequiresCompatibilities:
+        - FARGATE
+
+      NetworkMode: awsvpc
+      Cpu: '256'
+      Memory: '512'
+
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+
+      ContainerDefinitions:
+        - Name: backend
+          Image: !Sub '${BackendRepository.RepositoryUri}:latest'
+          Essential: true
+
+          PortMappings:
+            - ContainerPort: !Ref BackendPort
+              Protocol: tcp
+
+          Environment:
+            - Name: DB_HOST
+              Value: !Ref DatabaseEndpoint
+
+            - Name: DB_PORT
+              Value: '3306'
+
+            - Name: DB_NAME
+              Value: react_node_app
+
+            - Name: PORT
+              Value: !Sub '${BackendPort}'
+
+          Secrets:
+            - Name: DB_USER
+              ValueFrom: !Sub '${DatabaseSecretArn}:username::'
+
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub '${DatabaseSecretArn}:password::'
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref BackendLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: backend
+
+
+  BackendLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: threetier-backend-alb
+      Scheme: internet-facing
+      Type: application
+
+      SecurityGroups:
+        - !Ref ALBSecurityGroupId
+
+      Subnets:
+        - !Ref PublicSubnet1Id
+        - !Ref PublicSubnet2Id
+
+
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: threetier-backend-tg
+      VpcId: !Ref VpcId
+      Port: !Ref BackendPort
+      Protocol: HTTP
+      TargetType: ip
+
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: traffic-port
+      HealthCheckPath: /api/books
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+      Matcher:
+        HttpCode: '200-399'
+
+
+  BackendListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref BackendLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+
+
+  BackendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - BackendListener
+    Properties:
+      ServiceName: threetier-backend-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref BackendTaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroupId
+          Subnets:
+            - !Ref PrivateSubnet1Id
+            - !Ref PrivateSubnet2Id
+
+      LoadBalancers:
+        - ContainerName: backend
+          ContainerPort: !Ref BackendPort
+          TargetGroupArn: !Ref BackendTargetGroup
+
+
+Outputs:
+
+  BackendRepositoryUri:
+    Description: ECR repository URI
+    Value: !GetAtt BackendRepository.RepositoryUri
+
+  ECSClusterName:
+    Description: ECS cluster name
+    Value: !Ref ECSCluster
+
+  BackendServiceName:
+    Description: ECS service name
+    Value: !GetAtt BackendService.Name
+
+  BackendLoadBalancerDNS:
+    Description: Backend ALB DNS name
+    Value: !GetAtt BackendLoadBalancer.DNSName
+
+  BackendTargetGroupArn:
+    Description: Backend target group ARN
+    Value: !Ref BackendTargetGroup
