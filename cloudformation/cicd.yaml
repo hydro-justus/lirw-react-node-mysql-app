@@ -56,11 +56,9 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
 
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub
-                  - 'repo:${Org}/${Repo}:ref:refs/heads/${Branch}'
-                  - Org: !Ref GitHubOrg
-                    Repo: !Ref GitHubRepo
-                    Branch: !Ref GitHubBranch
+                token.actions.githubusercontent.com:sub:
+                  - 'repo:hydro-justus/lirw-react-node-mysql-app:ref:refs/heads/main'
+                  - 'repo:hydro-justus@*/lirw-react-node-mysql-app@*:ref:refs/heads/main'
 
 
       Policies:
