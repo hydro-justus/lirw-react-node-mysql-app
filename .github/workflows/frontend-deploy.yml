@@ -14,9 +14,8 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  S3_BUCKET: threetier-frontend-frontendbucket-wnp9wiqlelli
-  CLOUDFRONT_DISTRIBUTION_ID: E1T1515QRJKIUV
-
+  S3_BUCKET: threetier-frontend-frontendbucket-khchwf7gmxkp
+  CLOUDFRONT_DISTRIBUTION_ID: E1KLTL9C3PV16I
 jobs:
   deploy:
     runs-on: ubuntu-latest
