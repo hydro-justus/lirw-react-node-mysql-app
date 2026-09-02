@@ -1,12 +1,12 @@
-name: Deploy Backend
+name: Deploy Backend to ECS
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'backend/**'
-      - '.github/workflows/backend-deploy.yml'
+      - "backend/**"
+      - ".github/workflows/backend-deploy.yml"
 
 permissions:
   id-token: write
@@ -14,9 +14,9 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: threetier-backend
-  ECS_CLUSTER: threetier-cluster
-  ECS_SERVICE: threetier-backend-service
+  ECR_REPOSITORY: three-tier-app-repo
+  ECS_CLUSTER: three-tier-backend
+  ECS_SERVICE: 3tier-backend-task-service-0th1fkmy
 
 jobs:
   deploy:
@@ -29,28 +29,34 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::692859924055:role/threetier-github-actions-role
+          role-to-assume: arn:aws:iam::692859924055:role/GitHubActions-ThreeTier-Deploy
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push Docker image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      - name: Build and push backend image
+        working-directory: backend
         run: |
           docker build \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
-            ./backend
+            -t 692859924055.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest \
+            -t 692859924055.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }} \
+            .
 
-          docker push \
-            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push 692859924055.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+          docker push 692859924055.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
       - name: Deploy new image to ECS
         run: |
           aws ecs update-service \
-            --cluster $ECS_CLUSTER \
-            --service $ECS_SERVICE \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
             --force-new-deployment \
-            --region $AWS_REGION
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for ECS service
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --region ${{ env.AWS_REGION }}
