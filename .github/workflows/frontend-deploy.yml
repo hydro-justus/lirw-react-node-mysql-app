@@ -13,13 +13,14 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: us-east-1
-  S3_BUCKET: 3tier-frontend-692859924055
-  CLOUDFRONT_DISTRIBUTION_ID: E1Q57R1XQ6C4D0
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: AWS
 
     steps:
       - name: Checkout repository
@@ -28,7 +29,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::692859924055:role/GitHubActions-ThreeTier-Deploy
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install dependencies
